@@ -17,16 +17,17 @@
 
 ## 特性
 
-- **三态信息栏**：自动检测当前服务商是**订阅制**（额度窗口，如 Codex / OpenCode Go / 智谱 / 小米 Token Plan）、**账单制**（本月真实账单，如 Together / Fireworks / AWS Bedrock / Cloudflare）还是**余额制**，三种模式互斥替换、绝不叠加；余额制保持原样。
+- **三态信息栏**：自动检测当前服务商是**订阅制**（额度窗口，如 Codex / OpenCode Go / 智谱 / 小米 Token Plan / Ollama Cloud）、**账单制**（本月真实账单，如 Together / Fireworks / AWS Bedrock / Cloudflare）还是**余额制**，三种模式互斥替换、绝不叠加；余额制保持原样。
 - **ChatGPT 订阅卡（纯本地）**：当前服务商为 **ChatGPT / Codex** 时，本地解码 `~/.codex/auth.json` 的登录令牌，直接显示**真实套餐档位 + 到期日期**，例如 `ChatGPT · Plus | 到期 2026-09-16`——纯本地解析、零网络请求，展示 OpenAI 官方登录态中的真实订阅信息，不做任何本地估算。未登录时显示「未绑定」引导。**绑定 / 令牌续期 / ChatGPT 模型路由不在本插件内**——请安装配套插件 [**dsh-chatgpt-subscription**](https://github.com/songoao25)（独立仓库）绑定 ChatGPT 账号；本插件只读令牌显示信息。
 - **订阅额度显示（OpenCode Go / 智谱 / 小米 MiMo Token Plan）**：当前服务商为订阅制时，信息栏显示**订阅服务 + 模型**（如 `OpenCode Go · V4 Flash`，小米显示 `小米 MiMo`），**5小时 / 周 / 月** 窗口**剩余额度**（剩余 = 100 − 已用，数值加粗），以及**距重置倒计时**（如 `距重置 1d 21h`）。**额度与倒计时严格来自同一窗口**。额度来源：
   - **OpenCode Go**：经 `OPENCODE_GO_API_KEY`（设置 → 模型）或 opencode CLI 登录（`~/.local/share/opencode/auth.json` 的 `opencode-go` 条目）读取 `opencode.ai/zen/go/v1/usage` 额度；未配置时显示「未配置 OpenCode Go」引导，不报错
   - **智谱**：经 `ZAI_CODING_CN_API_KEY`（回退 `ZAI_API_KEY`）读取 GLM Coding Plan 套餐额度；未配置时显示引导，不报错
   - **小米 MiMo Token Plan**：经 `XIAOMI_TOKEN_PLAN_CN/SGP/AMS_API_KEY`（按地区，回退 `XIAOMI_API_KEY`）读取月度 Credits 额度；未配置时显示引导，不报错
+  - **Ollama Cloud**：经 `OLLAMA_API_KEY` 读取 `ollama.com/api/usage` 的 5 小时会话与周窗口已用比例（免费/Pro 同一接口；免费额度官方不公开绝对值，只显示比例进度条，绝不编造金额或重置时刻）
 - **账单型显示（本月真实账单）**：当前服务商为 **Together / Fireworks / AWS Bedrock / Cloudflare** 时，从官方计费 API 读取**本月真实已用金额**，显示如 `Together | 本月 $12.34`、`AWS Bedrock | 本月 $45.60 · 预算 46%`；Cloudflare 在接口提供免费额度时额外显示每日免费额度剩余与零点重置倒计时（接口给不出免费额度时只显示真实用量，绝不编造）。账单数据全部来自服务商官方返回，**不做任何本地估算显示**；无凭据时显示「未配置」引导
 - **一体替换**：默认替换原生统计栏，原生信息（轮·步 / LLM 耗时 / 工具调用 / 缓存命中 / 输入输出 tokens）照常显示、格式与原生一致；**首 token 平均 / tok/s** 两个速度指标移入 hover 浮窗，单行一眼看完
 - **服务商 + 具体模型**：模型名/服务商名与模型切换器**完全一致**（读取 DSH 模型目录 `name`，如 `DeepSeek-V4-Flash`），服务商名加粗；服务商名已是模型名前缀时只显示模型名（切换器样式）
-- **实时余额**：DeepSeek `/user/balance` 真实 API，60 秒自动刷新；失败保留上次快照并提示，不中断使用
+- **实时余额**：DeepSeek `/user/balance` 真实 API，60 秒自动刷新；失败保留上次快照并提示，不中断使用。**Charm Hyper** 经 `CHARMHYPER_API_KEY`（回退 `HYPER_API_KEY`、`CHARM_HYPER_API_KEY`）读取 `hyper.charm.land/v1/credits` 显示 Hypercredit 积分余额，如 `98 HC`
 - **峰谷价 + 倒计时**：高峰价（琥珀色加粗）/ 空闲价（绿色加粗）+ 距下次切换倒计时；无峰谷价的服务商自动隐藏
 - **真实花费**：逐请求记账（`llm/stream` usage × 单价），按 **本会话（含子代理）/ 今天 / 近一月 / 全部** 精确聚合——子代理与主会话同属一个服务商账户，其记录按"会话起点 + 同账户"一并计入本会话花费；**记账数据落盘持久化（重启不丢失）**
 - **数字加粗**：余额、倒计时、花费与统计数字统一加粗，一目了然
@@ -49,6 +50,7 @@
 | openrouter | OpenRouter | OPENROUTER_API_KEY | 官方 API |
 | stepfun | 阶跃星辰 | STEPFUN_API_KEY | 官方 API |
 | xiaomi | 小米 MiMo | XIAOMI_API_KEY | 官方 API |
+| hyper / charm-hyper / charmhyper | Charm Hyper | CHARMHYPER_API_KEY（回退 HYPER_API_KEY、CHARM_HYPER_API_KEY） | 官方 API（/v1/credits） |
 
 ### 订阅制服务商（额度窗口）
 | 服务商 | 显示名称 | 令牌来源 |
@@ -57,6 +59,7 @@
 | opencode-go / opencode | OpenCode Go | OPENCODE_GO_API_KEY 或 opencode auth.json |
 | zai / zai-coding-cn | 智谱 | ZAI_CODING_CN_API_KEY（回退 ZAI_API_KEY） |
 | xiaomi-token-plan-cn / -sgp / -ams | 小米 MiMo | XIAOMI_TOKEN_PLAN_CN/SGP/AMS_API_KEY（回退 XIAOMI_API_KEY） |
+| ollama-cloud | Ollama Cloud | OLLAMA_API_KEY（回退 OLLAMA_CLOUD_API_KEY） |
 
 ### 账单制服务商（本月真实账单）
 | 服务商 | 显示名称 | 凭据键名 | 账单 API |

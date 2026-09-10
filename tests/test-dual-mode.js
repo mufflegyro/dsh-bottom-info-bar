@@ -65,6 +65,7 @@ const openCodeGoWindowKey = extractFn('openCodeGoWindowKey'); // parseOpenCodeGo
 const normalizeResetAt = extractFn('normalizeResetAt'); // parseOpenCodeGoUsage 的依赖
 const parseCodexUsage = extractFn('parseCodexUsage');
 const parseOpenCodeGoUsage = extractFn('parseOpenCodeGoUsage');
+const parseOllamaUsage = extractFn('parseOllamaUsage'); // v1.11：Ollama Cloud /api/usage 解析
 const mergeSubscriptionResult = extractFn('mergeSubscriptionResult');
 
 let pass = 0, fail = 0;
@@ -112,6 +113,18 @@ check('账户映射：xiaomi-token-plan-sgp → xiaomi-token-plan', accountForPr
 check('账户映射：together → together', accountForProvider('together'), 'together');
 check('账户映射：amazon-bedrock → amazon-bedrock', accountForProvider('amazon-bedrock'), 'amazon-bedrock');
 check('账户映射：cloudflare-ai-gateway → cloudflare', accountForProvider('cloudflare-ai-gateway'), 'cloudflare');
+// v1.11：Ollama Cloud（订阅额度）/ Charm Hyper（预付积分余额）
+check('provider=ollama-cloud → subscription', detectBillingMode('ollama-cloud', 'auto').mode, 'subscription');
+check('订阅源映射：ollama-cloud → ollama', subscriptionSourceFor('ollama-cloud'), 'ollama');
+check('账户映射：ollama-cloud → ollama-cloud', accountForProvider('ollama-cloud'), 'ollama-cloud');
+check('本地 ollama（非云）→ 订阅源 null（不做云配额）', subscriptionSourceFor('ollama'), null);
+check('provider=hyper → balance（预付积分）', detectBillingMode('hyper', 'auto').mode, 'balance');
+check('账户映射：hyper → hyper', accountForProvider('hyper'), 'hyper');
+check('账户映射：charm-hyper → hyper', accountForProvider('charm-hyper'), 'hyper');
+check('账户映射：charmhyper（常见 DSH 路由 id）→ hyper', accountForProvider('charmhyper'), 'hyper');
+check('provider=charmhyper → balance（预付积分）', detectBillingMode('charmhyper', 'auto').mode, 'balance');
+check('订阅源映射：hyper → null（余额制）', subscriptionSourceFor('hyper'), null);
+check('订阅源映射：charmhyper → null（余额制）', subscriptionSourceFor('charmhyper'), null);
 check('账户映射：未知 → null', accountForProvider('some-unknown'), null);
 check('未知 provider → balance（兜底）', detectBillingMode('some-new-provider', 'auto').mode, 'balance');
 check('空 provider → balance（兜底）', detectBillingMode('', 'auto').mode, 'balance');
@@ -119,7 +132,7 @@ check('手动覆盖 balance：codex + billingMode=balance → balance', detectBi
 check('手动覆盖 subscription：deepseek + billingMode=subscription → subscription', detectBillingMode('deepseek', 'subscription').mode, 'subscription');
 check('手动覆盖理由 = manual-override', detectBillingMode('codex', 'balance').reason, 'manual-override');
 check('auto 理由含 provider 标识', detectBillingMode('codex', 'auto').reason, 'provider:codex');
-check('订阅 provider 集合配置正确', JSON.stringify(SUBSCRIPTION_PROVIDERS), JSON.stringify(['codex', 'chatgpt', 'opencode-go', 'opencode', 'openai-codex', 'zai', 'zai-coding-cn', 'xiaomi-token-plan-cn', 'xiaomi-token-plan-sgp', 'xiaomi-token-plan-ams']));
+check('订阅 provider 集合配置正确', JSON.stringify(SUBSCRIPTION_PROVIDERS), JSON.stringify(['codex', 'chatgpt', 'opencode-go', 'opencode', 'openai-codex', 'zai', 'zai-coding-cn', 'xiaomi-token-plan-cn', 'xiaomi-token-plan-sgp', 'xiaomi-token-plan-ams', 'ollama-cloud']));
 check('账单 provider 集合配置正确', JSON.stringify(BILLING_PROVIDERS), JSON.stringify(['together', 'fireworks', 'amazon-bedrock', 'cloudflare-ai-gateway', 'cloudflare-workers-ai']));
 
 // ---- 2) 窗口时长映射边界 ----
@@ -211,6 +224,26 @@ check('秒级数值 resetsAt → ×1000', parseOpenCodeGoUsage(ogSec).windows[0]
 check('OpenCode Go 空对象 → null', parseOpenCodeGoUsage({}), null);
 check('OpenCode Go 无 usage → null', parseOpenCodeGoUsage({ foo: 1 }), null);
 check('OpenCode Go null → null', parseOpenCodeGoUsage(null), null);
+
+// ---- v1.11：Ollama Cloud /api/usage 解析（limits.session/weekly 的 0..1 已用比例） ----
+const ollamaFull = { limits: { session: { usage: 0.1661 }, weekly: { usage: 0.3 } } };
+const ollamaParsed = parseOllamaUsage(ollamaFull);
+check('Ollama 双窗口：数量 = 2', ollamaParsed.windows.length, 2);
+check('Ollama session(0.1661) → five_hour 17%', ollamaParsed.windows[0].key === 'five_hour' && ollamaParsed.windows[0].usedPercent, 17);
+check('Ollama weekly(0.3) → seven_day 30%', ollamaParsed.windows[1].key === 'seven_day' && ollamaParsed.windows[1].usedPercent, 30);
+check('Ollama 固定套餐名', ollamaParsed.plan, 'Ollama');
+// 免费额度不公开绝对值：无 resetsAt 时不编造重置时刻
+check('Ollama 无重置字段 → resetsAt=null', ollamaParsed.windows[0].resetsAt, null);
+// 接口给出重置时刻时归一化（秒级数值 ×1000）
+const ollamaReset = { limits: { session: { usage: 0.5, resetsAt: 1785000000 } } };
+check('Ollama resetsAt 秒级 → ×1000', parseOllamaUsage(ollamaReset).windows[0].resetsAt, 1785000000000);
+// >1 的比例（超额）钳制到 100，窗口不消失
+check('Ollama usage>1 钳制到 100%', parseOllamaUsage({ limits: { session: { usage: 1.4 } } }).windows[0].usedPercent, 100);
+// 结构异常 → null
+check('Ollama 空对象 → null', parseOllamaUsage({}), null);
+check('Ollama 无 limits → null', parseOllamaUsage({ foo: 1 }), null);
+check('Ollama null → null', parseOllamaUsage(null), null);
+check('Ollama usage 非数字 → null（整窗跳过）', parseOllamaUsage({ limits: { session: { usage: 'abc' } } }), null);
 
 // ---- 5) 快照失败回退（mergeSubscriptionResult：失败保留旧 data/fetchedAt，仅换 error） ----
 const prevSnap = {

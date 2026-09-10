@@ -490,6 +490,28 @@ async function getAliyunBailianQuota(options = {}) {
 
 ---
 
+## 五、附录：v1.11 新增适配器（Ollama Cloud / Charm Hyper）
+
+### 5.1 Ollama Cloud（订阅制额度窗口）
+
+- **接口路径**: `GET https://ollama.com/api/usage`
+- **认证方式**: `Authorization: Bearer {OLLAMA_API_KEY}`（免费与 Pro 同一接口）
+- **返回结构**: `{ limits: { session: { usage: <0..1> }, weekly: { usage: <0..1> } } }`
+  - `usage` 为已用比例（实测 0.0x..0.3x），换算为 0..100 百分比进度条
+  - 覆盖 5 小时会话窗口 + 周窗口；免费额度绝对值官方不公开，**不编造金额/重置时刻**
+- **凭据**: `OLLAMA_API_KEY`（DSH Settings → Models）
+- 🟢 **来源**: [docs.ollama.com/cloud](https://docs.ollama.com/cloud)、[dsh-usage-stats lib/subscriptions.js](https://github.com/Ychris12138/dsh-usage-stats/blob/main/lib/subscriptions.js)（社区实测形态）
+
+### 5.2 Charm Hyper（余额制预付积分）
+
+- **接口路径**: `GET https://hyper.charm.land/v1/credits`
+- **认证方式**: `Authorization: Bearer {HYPER_API_KEY}`（回退 `CHARM_HYPER_API_KEY`）
+- **返回结构**: `{ balance: <number> }`（整数积分）或 `{ balance_usd: <number> }`（美元额度），无充值/赠金拆分
+- **显示**: `98 HC`（币种码 `HC` 后缀，无公开 ISO 币种字段）
+- 🟢 **来源**: [@charmland/pi-hyper-provider src/credits.ts](https://github.com/charmbracelet/pi-hyper-provider/blob/main/src/credits.ts)（Charm 官方 pi 扩展同款端点）
+
+---
+
 **报告完成时间**: 2025-08-27  
 **调研工程师**: AI Agent（委托执行）  
 **审核状态**: 待主 Agent 验收

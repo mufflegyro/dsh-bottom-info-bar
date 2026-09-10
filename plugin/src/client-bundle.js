@@ -1634,6 +1634,7 @@ module.exports = {
         if (provider === 'chatgpt' || provider === 'openai-codex') return 'ChatGPT';
         if (provider === 'codex') return 'Codex';
         if (provider === 'opencode-go' || provider === 'opencode') return 'OpenCode Go';
+        if (provider === 'ollama-cloud') return 'Ollama Cloud';
         if (provider === 'zai' || provider === 'zai-coding-cn') return t('ui.zhipu');
         if (provider === 'xiaomi-token-plan-cn' || provider === 'xiaomi-token-plan-sgp' || provider === 'xiaomi-token-plan-ams') return t('ui.xiaomiMiMo');
         return t('ui.subscription');
@@ -1731,16 +1732,11 @@ module.exports = {
         }
         pushTimeGroups(groups);
 
-        // v1.6 T7：未适配账户渲染"未适配"弱提示
-        if (bal && bal.unmapped) {
-          if (fieldVisible('unmapped')) {
-            trailingErrorGroups.push(fieldSpan('unmapped', 'unmapped',
-              React.createElement('span', { className: 'bi-muted', title: t('ui.balanceLookupIsNotYet') }, t('ui.notSupported'))));
-          }
-        }
+        // v1.12：未适配服务商不在此渲染 —— 上方 dispatch 直接跳过 pushBalanceGroups（row2 整体隐藏），
+        // 只保留原生会话统计行 row1；不再显示「未适配」弱提示（用户指定：未适配即隐藏整条 provider 行）。
         // 余额（纯金额；hover 仅展示余额，不显示充值/赠金）
         // v1.6 T7：未配置提示改为按账户显示凭据名（去掉写死的 DeepSeek 文案）
-        else if (bal && bal.error && bal.error.kind === 'no-key') {
+        if (bal && bal.error && bal.error.kind === 'no-key') {
           if (fieldVisible('noKeyHint')) {
             const credName = bal.error.message ? String(hostText(bal.error.message)).replace(/(?:未配置 |Not configured: )/, '') : 'API_KEY';
             trailingErrorGroups.push(fieldSpan('noKeyHint', 'nokey',
@@ -1748,13 +1744,14 @@ module.exports = {
                 t('ui.notConfiguredSettingsModels', { credName: credName }))));
           }
         } else if (bal && bal.data) {
-          const symbol = bal.currency === 'USD' ? '$' : '¥';
+          const symbol = bal.currency === 'USD' ? '$' : bal.currency === 'CNY' ? '¥' : bal.currency === 'HC' ? ' HC' : '¥';
+          const balanceDigits = bal.currency === 'HC' ? 0 : undefined;
           const balTitle = bal.estimate
-            ? t('ui.estimatedBalance', { symbol: symbol, value: fmt(bal.data.total) })
-            : t('ui.balance', { symbol: symbol, value: fmt(bal.data.total) });
+            ? t('ui.estimatedBalance', { symbol: symbol, value: fmt(bal.data.total, balanceDigits) })
+            : t('ui.balance', { symbol: symbol, value: fmt(bal.data.total, balanceDigits) });
           if (fieldVisible('balance')) {
             groups.push(fieldSpan('balance', 'bal', React.createElement('span', { title: balTitle },
-              metric(t('ui.balance.pushBalanceGroups'), symbol + fmt(bal.data.total), alertActive ? 'bi-alert-num' : ''),
+              metric(t('ui.balance.pushBalanceGroups'), symbol + fmt(bal.data.total, balanceDigits), alertActive ? 'bi-alert-num' : ''),
               alertActive ? React.createElement('span', { className: 'bi-low-status' }, t('ui.low')) : null,
               bal.estimate ? React.createElement('span', { className: 'bi-muted' }, t('ui.estimated')) : null,
             )));
@@ -1799,7 +1796,10 @@ module.exports = {
 
         // 本会话花费（公共小部件 pushSessionCost：只显示钱；hover 显示 今天/近一月/全部）
         // 始终显示：新会话/对话刚开始尚无记账时显示 ¥0.000，hover 仍可查看持久化的 今天/近一月/全部
-        pushSessionCost(groups, trailingErrorGroups, !!(bal && bal.currency === 'USD'));
+        // v1.11：HC（Charm Hyper 积分）的本地 ¥/$ 花费与积分余额概念不同，不显示以免误导
+        if (!(bal && bal.currency === 'HC')) {
+          pushSessionCost(groups, trailingErrorGroups, !!(bal && bal.currency === 'USD'));
+        }
       }
 
       // 本会话花费块（余额制 与 订阅·充值余额 形态共用的小部件）：
@@ -1912,13 +1912,19 @@ module.exports = {
           // 优先级：5小时 > 周 > 月（按窗口时长排序，而非已用百分比）
           const windowPriority = { five_hour: 1, seven_day: 2, monthly: 3 };
           const windowsWithReset = windows.filter(function (w) { return w.resetsAt; });
+          // 无任何窗口带重置时刻（如 Ollama Cloud /api/usage 不返回 resetsAt）时，
+          // 简洁模式仍按窗口时长优先级选出最短窗口（否则整组不渲染）；倒计时仍只在有 resetsAt 时显示。
           const displayWindow = windowsWithReset.length > 0
             ? windowsWithReset.slice().sort(function (a, b) {
                 const pa = windowPriority[a.key] || 99;
                 const pb = windowPriority[b.key] || 99;
                 return pa - pb;
               })[0]
-            : null;
+            : windows.slice().sort(function (a, b) {
+                const pa = windowPriority[a.key] || 99;
+                const pb = windowPriority[b.key] || 99;
+                return pa - pb;
+              })[0];
 
           // 完整模式显示全部窗口；简洁模式只显示选中的那个窗口
           const visible = full ? windows : (displayWindow ? [displayWindow] : []);
@@ -2064,6 +2070,9 @@ module.exports = {
         pushBillingGroups(groups, trailingErrorGroups);
       } else if (isSub) {
         pushSubscriptionGroups(groups, trailingErrorGroups);
+      } else if (state.balance && state.balance.unmapped) {
+        // 未适配服务商：不渲染 provider 行（不显示模型名/余额/「未适配」提示），只保留原生会话统计行（row1）。
+        // groups 保持为空 → row2 不创建（见下方 row2 = nodes.length === 0 ? null）。
       } else {
         pushBalanceGroups(groups, trailingErrorGroups);
       }
@@ -2101,7 +2110,8 @@ module.exports = {
 
        // ---- 组装（分隔符收合与「刷新失败」去重见模块级 assembleInfoBarRow） ----
        const nodes = assembleInfoBarRow(groups, trailingErrorGroups, React.createElement);
-       const row2 = React.createElement('div', { id: 'dsh-bottom-info-bar-primary', className: 'bi-row2' }, ...nodes);
+       // 未适配服务商（或字段全空）时主行为空 → 不渲染空 row2（保留原生统计行 row1）
+       const row2 = nodes.length === 0 ? null : React.createElement('div', { id: 'dsh-bottom-info-bar-primary', className: 'bi-row2' }, ...nodes);
 
       let row1 = null;
       if (statsProj) {
@@ -2193,7 +2203,9 @@ module.exports = {
         },
         role: 'button',
         tabIndex: 0,
-        'aria-labelledby': full && row1 !== null ? 'dsh-bottom-info-bar-native dsh-bottom-info-bar-primary' : 'dsh-bottom-info-bar-primary',
+        'aria-labelledby': row2 === null
+          ? (row1 !== null ? 'dsh-bottom-info-bar-native' : undefined)
+          : (full && row1 !== null ? 'dsh-bottom-info-bar-native dsh-bottom-info-bar-primary' : 'dsh-bottom-info-bar-primary'),
         'aria-describedby': 'dsh-bottom-info-bar-action',
         'aria-pressed': full,
         'aria-busy': isDensitySaving,

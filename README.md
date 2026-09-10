@@ -18,16 +18,17 @@ The preview was captured before the English UI update. From top to bottom, the c
 ## Features
 
 - **Dual-mode billing bar** — Auto-detects whether the active provider is subscription-based (Codex / OpenCode Go) or balance-based. The two modes replace each other, never overlap; balance mode stays exactly as before.
-- **Three-state billing bar** — Auto-detects whether the active provider is **subscription-based** (quota windows: Codex / OpenCode Go / Zhipu / Xiaomi MiMo Token Plan), **cloud-billing-based** (this month's real bill: Together / Fireworks / AWS Bedrock / Cloudflare), or **balance-based**. The three modes replace each other, never overlap; balance mode stays exactly as before.
+- **Three-state billing bar** — Auto-detects whether the active provider is **subscription-based** (quota windows: Codex / OpenCode Go / Zhipu / Xiaomi MiMo Token Plan / Ollama Cloud), **cloud-billing-based** (this month's real bill: Together / Fireworks / AWS Bedrock / Cloudflare), or **balance-based**. The three modes replace each other, never overlap; balance mode stays exactly as before.
 - **ChatGPT subscription card (pure local)** — When the active provider is **ChatGPT / Codex**, the bar decodes `~/.codex/auth.json` locally and shows the **real plan tier + expiry date**, e.g. `ChatGPT · Plus | Expires 2026-09-16` — zero network, real fields straight from OpenAI's own login token (chatgpt_plan_type / subscription_active_until), no local estimation. Not signed in → **Refresh failed**, with a reauthorization reminder in the tooltip. Binding, token refresh and the `openai-codex` model route are **not part of this plugin** — install the companion plugin [**dsh-chatgpt-subscription**](https://github.com/songoao25) (separate repo) to bind your ChatGPT account; this bar only reads the token.
 - **Subscription quota display (OpenCode Go / Zhipu / Xiaomi MiMo Token Plan)** — When the active provider is a subscription service, the bar shows the **subscription service · model** (e.g. `OpenCode Go · V4 Flash`, `Xiaomi MiMo · Mimo-V2.5`), the **5-hour / weekly / monthly quota remaining** per window (remaining = 100 − used), and a **countdown to the next reset** (e.g. `Resets in 1d 21h`). **Quota and countdown always match** — both come from the same window. Quota sources:
   - **OpenCode Go** — reads quota from `opencode.ai/zen/go/v1/usage` via `OPENCODE_GO_API_KEY` (Settings → Models) or the opencode CLI login (`~/.local/share/opencode/auth.json`); missing key → "not configured" hint instead of an error.
   - **Zhipu (zai / zai-coding-cn)** — reads GLM Coding Plan quota via `ZAI_CODING_CN_API_KEY` (fallback: `ZAI_API_KEY`); shows plan tier + 5-hour window remaining.
   - **Xiaomi MiMo Token Plan** — reads monthly Credits quota via `XIAOMI_TOKEN_PLAN_CN/SGP/AMS_API_KEY` per region (fallback: `XIAOMI_API_KEY`); shows plan name + monthly window.
+  - **Ollama Cloud** — reads the 5-hour session and weekly usage ratios from `ollama.com/api/usage` via `OLLAMA_API_KEY` (free and Pro share the same endpoint; free-tier absolute numbers are not published, so only percentage bars are shown — never a fabricated amount or reset time).
 - **Cloud-billing display (real monthly bill)** — When the active provider is **Together / Fireworks / AWS Bedrock / Cloudflare**, the bar reads the official billing API and shows **this month's real spend**, e.g. `Together | This month $12.34`, `AWS Bedrock | This month $45.60 · Budget 46%`. Cloudflare additionally shows daily free-quota remaining and a UTC-midnight reset countdown **only when the API actually reports a free allowance** (otherwise it shows real usage only — never fabricated). All bill figures come from official provider APIs; **no local estimation is ever displayed**. Missing keys → "not configured" hint.
 - **Drop-in replacement** — Replaces the native stats row while keeping its core original information (turns/steps, LLM latency, tool calls, cache hit rate, in/out tokens) with a native-consistent layout. Speed metrics (TTFT, tok/s) move to the hover tooltip so the row stays on a single line.
 - **Provider & model detection** — Always shows provider and model separately, exactly as in the DSH LLM catalog (for example, `DeepSeek · V4-Flash`). The provider is bold; when a catalog model name repeats its provider prefix, only that duplicate prefix is removed from the model part.
-- **Live balance** — Fetches real balance from DeepSeek's `/user/balance` API, auto-refreshes every 60 s, and keeps the last known snapshot on failure so usage is never interrupted.
+- **Live balance** — Fetches real balance from DeepSeek's `/user/balance` API, auto-refreshes every 60 s, and keeps the last known snapshot on failure so usage is never interrupted. **Charm Hyper** shows its Hypercredit balance from `hyper.charm.land/v1/credits` via `CHARMHYPER_API_KEY` (fallback: `HYPER_API_KEY`, `CHARM_HYPER_API_KEY`), e.g. `98 HC`.
 - **Peak / off-peak pricing** — Shows peak (alert red, bold) and off-peak (green, bold) prices with a countdown to the next switch; hidden automatically for providers without tiered pricing. The text labels remain visible in both appearances.
 - **Real spend tracking** — Records every `llm/stream` request (usage × unit price) and aggregates precisely by **this session (includes subagents) / today / last 30 days / all time**. Subagents share the same provider account, so their records are folded into the current session's spend (session starts at the earliest record of the current session, then every same-account record from that moment on counts). Records are persisted to disk — nothing is lost on restart.
 - **Bold numbers** — Balance, countdown, spend, and all stats are rendered with bold numerals for instant readability.
@@ -50,6 +51,7 @@ The bar auto-detects your provider from the DSH model catalog — **zero configu
 | openrouter | OpenRouter | OPENROUTER_API_KEY | Official API |
 | stepfun | StepFun | STEPFUN_API_KEY | Official API |
 | xiaomi | Xiaomi MiMo | XIAOMI_API_KEY | Official API |
+| hyper / charm-hyper / charmhyper | Charm Hyper | CHARMHYPER_API_KEY (fallback: HYPER_API_KEY, CHARM_HYPER_API_KEY) | Official API (/v1/credits) |
 
 ### Subscription-based providers (quota windows)
 | Provider | Display Name | Token Source |
@@ -58,6 +60,7 @@ The bar auto-detects your provider from the DSH model catalog — **zero configu
 | opencode-go / opencode | OpenCode Go | OPENCODE_GO_API_KEY or opencode auth.json |
 | zai / zai-coding-cn | Zhipu | ZAI_CODING_CN_API_KEY (fallback: ZAI_API_KEY) |
 | xiaomi-token-plan-cn / -sgp / -ams | Xiaomi MiMo | XIAOMI_TOKEN_PLAN_CN/SGP/AMS_API_KEY (fallback: XIAOMI_API_KEY) |
+| ollama-cloud | Ollama Cloud | OLLAMA_API_KEY (fallback: OLLAMA_CLOUD_API_KEY) |
 
 ### Cloud-billing providers (real monthly bill)
 | Provider | Display Name | Credential Key | Billing API |

@@ -10,6 +10,7 @@ import { chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readF
 import { createHash, createHmac, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { execFile } from 'node:child_process'
 // v1.9.0 PR2：字段注册表/预设色名单一来源（ESM 直接 import，构建时把 constants.js 一并复制进 lib/）
 import { FIELD_REGISTRY, PRESET_COLOR_NAMES } from './constants.js'
 import * as hostLocale from './host-locale.js'
@@ -125,6 +126,8 @@ function accountForProvider(pid) {
   if (pid === 'stepfun') return 'stepfun'
   if (pid === 'codex' || pid === 'chatgpt' || pid === 'openai-codex') return 'codex' // 订阅源 codex
   if (pid === 'opencode-go' || pid === 'opencode') return 'opencode-go' // 订阅源 opencode-go
+  if (pid === 'ollama-cloud') return 'ollama-cloud' // 订阅源 ollama（Ollama Cloud 官方 /api/usage）
+  if (pid === 'hyper' || pid === 'charm-hyper' || pid === 'charmhyper') return 'hyper' // 预付积分余额（Charm Hyper /v1/credits；charmhyper 为常见 DSH 路由 id）
   if (pid === 'zai' || pid === 'zai-coding-cn') return 'zai' // 订阅源 zai
   if (pid === 'xiaomi') return 'xiaomi'
   if (pid === 'xiaomi-token-plan-cn' || pid === 'xiaomi-token-plan-sgp' || pid === 'xiaomi-token-plan-ams') return 'xiaomi-token-plan'
@@ -157,6 +160,7 @@ function codexWindowKey(limitWindowSeconds) {
 function subscriptionSourceFor(providerId) {
   if (providerId === 'codex' || providerId === 'chatgpt' || providerId === 'openai-codex') return 'codex'
   if (providerId === 'opencode-go' || providerId === 'opencode') return 'opencode-go'
+  if (providerId === 'ollama-cloud') return 'ollama'
   if (providerId === 'zai' || providerId === 'zai-coding-cn') return 'zai'
   if (providerId === 'xiaomi-token-plan-cn') return 'xiaomi-cn'
   if (providerId === 'xiaomi-token-plan-sgp') return 'xiaomi-sgp'
@@ -289,6 +293,62 @@ function parseOpenCodeGoUsage(body, windowLabels) {
     })
   }
   return { plan: 'OpenCode Go', windows: windows }
+}
+
+// 解析 Ollama Cloud usage 响应（ollama-usage 二进制 JSON 形态）：{ plan, session: { percent, resets_at }, weekly: { percent, resets_at } }
+// percent 为 0-100 浮点值（已用比例）；resets_at 为 ISO 字符串或 null
+// 同时也兼容旧式 API 响应 { limits: { session: { usage:0..1 }, weekly: { usage:0..1 } } }
+function parseOllamaUsage(body, windowLabels) {
+  if (!body || typeof body !== 'object') return null
+  const windows = []
+  // 二进制 JSON 形态（ollama-usage Go 工具）：{plan,session:{percent,resets_at},weekly:{percent,resets_at}}
+  // percent 为 0-100 浮点已用比例，非 0..1
+  if (typeof body.session === 'object' && body.session !== null && typeof body.session.percent === 'number') {
+    for (const slot of [['session', 'five_hour'], ['weekly', 'seven_day']]) {
+      const meter = body[slot[0]]
+      if (!meter || typeof meter.percent !== 'number') continue
+      windows.push({
+        key: slot[1],
+        label: (windowLabels || WINDOW_LABELS)[slot[1]],
+        usedPercent: Math.min(100, Math.round(meter.percent)),
+        resetsAt: meter.resets_at ? normalizeResetAt(meter.resets_at) : null,
+      })
+    }
+    if (windows.length > 0) return { plan: body.plan || 'Ollama', windows: windows }
+  }
+  // 旧式 API 响应降级：{ limits: { session: { usage:0..1 }, weekly: { usage:0..1 } } }
+  const limits = body.limits
+  if (limits && typeof limits === 'object') {
+    const slots = [
+      { key: 'session', winKey: 'five_hour' },
+      { key: 'weekly', winKey: 'seven_day' },
+    ]
+    for (let i = 0; i < slots.length; i++) {
+      const win = limits[slots[i].key]
+      if (!win || typeof win !== 'object') continue
+      const ratio = win.usage
+      if (typeof ratio !== 'number' || !isFinite(ratio) || ratio < 0) continue
+      windows.push({
+        key: slots[i].winKey,
+        label: (windowLabels || WINDOW_LABELS)[slots[i].winKey],
+        usedPercent: Math.min(100, Math.round(ratio * 100)),
+        resetsAt: normalizeResetAt(win.resetsAt != null ? win.resetsAt : (win.resetAt != null ? win.resetAt : (win.nextReset != null ? win.nextReset : null))),
+      })
+    }
+  }
+  if (windows.length === 0) return null
+  return { plan: body.plan || 'Ollama', windows: windows }
+}
+
+// 解析 Charm Hyper /v1/credits 响应：{ balance } 或 { balance_usd }（预付积分/美元额度；Bearer HYPER_API_KEY）
+// 缺字段/结构异常 → null（走统一 parse 错误分支，绝不猜余额）
+function parseHyperCredits(body) {
+  if (!body || typeof body !== 'object') return null
+  const balance =
+    typeof body.balance === 'number' && isFinite(body.balance) ? body.balance
+    : (typeof body.balance_usd === 'number' && isFinite(body.balance_usd) ? body.balance_usd : null)
+  if (balance === null) return null
+  return { currency: 'HC', total: balance }
 }
 
 // 快照更新规则（"失败保留旧快照"的纯函数形态）：失败保留旧 data/fetchedAt 只换 error；成功换 data 并更新 fetchedAt
@@ -1349,6 +1409,15 @@ export default {
         estimate: false,
         parseBalance: parseXiaomiPaygBalance,
       },
+      // v1.11：Charm Hyper 预付积分余额适配器——官方 GET /v1/credits，返回 { balance } 整数积分
+      // 或 { balance_usd } 美元额度，无充值/赠金拆分。凭据链：CHARMHYPER_API_KEY（常见 DSH 路由的
+      // apiKeyEnv）→ HYPER_API_KEY（官方文档名）→ CHARM_HYPER_API_KEY（pi 扩展名）。
+      hyper: {
+        id: 'hyper', displayName: 'Charm Hyper', credential: ['CHARMHYPER_API_KEY', 'HYPER_API_KEY', 'CHARM_HYPER_API_KEY'],
+        balanceAPI: 'https://hyper.charm.land/v1/credits',
+        estimate: false,
+        parseBalance: parseHyperCredits,
+      },
     };
 
     // ---------- 配置（内存态） ----------
@@ -1419,17 +1488,26 @@ export default {
       }
       // 返回本次刷新 Promise：强制刷新路径（客户端打开页面）需等待最新结果落快照后再返回
       return (async function () {
+        // v1.11：凭据可配置为数组（依次尝试，如 hyper: HYPER_API_KEY → CHARM_HYPER_API_KEY 回退）；
+        // 字符串形态保持原有单次解析行为，语义完全不变。
+        const credNames = Array.isArray(prov.credential) ? prov.credential : [prov.credential];
         let cred = null;
-        try {
-          cred = await ctx.credentials.resolve(prov.credential);
-        } catch (err) {
-          // 与下方 http/parse/exception 分支一致：失败保留旧 data/fetchedAt，仅换 error；seq guard 防慢请求覆盖新快照
-          if (balanceSeq[pid] === seq) balances[pid] = { data: balances[pid] && balances[pid].data, fetchedAt: balances[pid] && balances[pid].fetchedAt, error: { kind: 'credentials', message: t('host.couldNotReadCredentials') } };
-          return;
+        let resolveCount = 0; // 全部失败且均为抛错 → credentials；其余（缺 key / 空值）→ no-key
+        let throwCount = 0;
+        for (let i = 0; i < credNames.length; i++) {
+          resolveCount++;
+          try {
+            const c = await ctx.credentials.resolve(credNames[i]);
+            if (c && typeof c.value === 'string' && c.value.length > 0) { cred = c; break; }
+          } catch (err) {
+            throwCount++;
+          }
         }
-        if (!cred || !cred.value) {
-          // no-key 同样保留旧快照：一次瞬断/未配置不把好数据清空（客户端据 error 显示配置引导/警示）
-          if (balanceSeq[pid] === seq) balances[pid] = { data: balances[pid] && balances[pid].data, fetchedAt: balances[pid] && balances[pid].fetchedAt, error: { kind: 'no-key', message: t('host.notConfigured', { credential: prov.credential }) } };
+        if (!cred) {
+          // 与下方 http/parse/exception 分支一致：失败保留旧 data/fetchedAt，仅换 error；seq guard 防慢请求覆盖新快照
+          if (balanceSeq[pid] === seq) balances[pid] = { data: balances[pid] && balances[pid].data, fetchedAt: balances[pid] && balances[pid].fetchedAt, error: throwCount === resolveCount
+            ? { kind: 'credentials', message: t('host.couldNotReadCredentials') }
+            : { kind: 'no-key', message: t('host.notConfigured', { credential: credNames[0] }) } };
           return;
         }
         try {
@@ -1526,6 +1604,68 @@ export default {
         const parsed = parseOpenCodeGoUsage(body, windowLabels);
         if (!parsed) return { error: { kind: 'parse', message: t('host.unexpectedResponseFormat') } };
         return { data: { provider: 'opencode-go', plan: parsed.plan, windows: parsed.windows } };
+      } catch (err) {
+        return { error: { kind: 'exception', message: String((err && err.message) || err) } };
+      }
+    }
+
+    // v1.11：Ollama Cloud 订阅额度——通过 ollama-usage 二进制（Firefox cookie + HTML 抓取）
+    // 命名来源：pi-agent 同名 Go 工具 github.com/charmbracelet/ollama-usage
+    // 输出 JSON { plan, session: { percent, resets_at }, weekly: { percent, resets_at } }
+    // 二进制安装：go install github.com/charmbracelet/ollama-usage@latest
+    function resolveOllamaBinary() {
+      const env = process.env['OLLAMA_USAGE_BIN'];
+      if (env) return env;
+      const candidates = [
+        '/usr/local/bin/ollama-usage',
+        '/opt/homebrew/bin/ollama-usage',
+        '/usr/bin/ollama-usage',
+      ];
+      for (let i = 0; i < candidates.length; i++) {
+        try { if (statSync(candidates[i]).isFile()) return candidates[i]; } catch (e) { /* try next */ }
+      }
+      return null;
+    }
+    // 运行 ollama-usage -json（child_process，宿主 Node 环境保证可用；不用 ctx.shell —— 该服务在 web 插件注入列表之外）
+    function runOllamaUsage(binary) {
+      return new Promise(function (resolve, reject) {
+        execFile(binary, ['-json'], { timeout: 20000, maxBuffer: 8 * 1024 * 1024 }, function (err, stdout, stderr) {
+          if (err) {
+            const detail = (stderr || '').toString().trim() || String((err.message || err));
+            reject(new Error(detail));
+            return;
+          }
+          resolve(stdout.toString());
+        });
+      });
+    }
+    async function fetchOllamaUsage() {
+      const binary = resolveOllamaBinary();
+      if (!binary) {
+        return { error: { kind: 'no-key', message: t('host.notConfigured', { credential: 'OLLAMA_USAGE_BIN' }) } };
+      }
+      try {
+        const stdout = await runOllamaUsage(binary);
+        const body = JSON.parse(stdout);
+        const windows = [];
+        if (body.session && typeof body.session.percent === 'number') {
+          windows.push({
+            key: 'five_hour',
+            label: windowLabels.five_hour,
+            usedPercent: Math.round(Math.min(100, body.session.percent)),
+            resetsAt: body.session.resets_at ? normalizeResetAt(body.session.resets_at) : null,
+          });
+        }
+        if (body.weekly && typeof body.weekly.percent === 'number') {
+          windows.push({
+            key: 'seven_day',
+            label: windowLabels.seven_day,
+            usedPercent: Math.round(Math.min(100, body.weekly.percent)),
+            resetsAt: body.weekly.resets_at ? normalizeResetAt(body.weekly.resets_at) : null,
+          });
+        }
+        if (windows.length === 0) return { error: { kind: 'parse', message: t('host.unexpectedResponseFormat') } };
+        return { data: { provider: 'ollama-cloud', plan: body.plan || 'Ollama', windows: windows } };
       } catch (err) {
         return { error: { kind: 'exception', message: String((err && err.message) || err) } };
       }
@@ -1902,6 +2042,7 @@ export default {
     const SUBSCRIPTION_SOURCES = {
       codex: { fetch: fetchCodexUsage },
       'opencode-go': { fetch: fetchOpenCodeGoUsage },
+      ollama: { fetch: fetchOllamaUsage },
       zai: { fetch: fetchZaiUsage },
       // v1.7 FR-9：小米 Token Plan 三集群各为独立源（地区隔离，快照互不串扰）
       'xiaomi-cn': { fetch: function () { return fetchXiaomiTokenPlanUsage('cn'); } },
@@ -2184,6 +2325,11 @@ export default {
       'amazon-bedrock': 'AWS Bedrock',
       'cloudflare-ai-gateway': 'Cloudflare',
       'cloudflare-workers-ai': 'Cloudflare',
+      'ollama': 'Ollama',
+      'ollama-cloud': 'Ollama Cloud',
+      'hyper': 'Charm Hyper',
+      'charm-hyper': 'Charm Hyper',
+      'charmhyper': 'Charm Hyper',
     };
 
     // ---------- DSH 模型/服务商目录名与能力缓存（M5：与模型切换器完全一致） ----------

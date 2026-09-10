@@ -39,7 +39,7 @@ const builtins = new Set([
   'apply', // 插件入口（对象形式 apply(ctx)）
   'next',  // waterfall 事件回调参数（llm/stream 的 next()）
   // Node 标准库导入与全局（静态形态）
-  'existsSync', 'mkdirSync', 'readFileSync', 'readdirSync', 'renameSync', 'statSync', 'openSync', 'writeSync', 'fsyncSync', 'closeSync', 'chmodSync', 'randomUUID', 'createHash', 'createHmac', 'homedir', 'join', 'dirname',
+  'existsSync', 'mkdirSync', 'readFileSync', 'readdirSync', 'renameSync', 'statSync', 'openSync', 'writeSync', 'fsyncSync', 'closeSync', 'chmodSync', 'randomUUID', 'createHash', 'createHmac', 'homedir', 'join', 'dirname', 'execFile',
   'process', 'URL', 'Buffer', 'decodeURIComponent', 'encodeURIComponent',
   'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
   'queueMicrotask', 'AbortController', 'fetch', 'require', 'module', 'exports',
@@ -73,7 +73,7 @@ if (missingHandlers.length === 0) console.log('PASS  ' + handlers.length + ' 个
 else { ok = false; console.log('FAIL  缺失 handler：' + missingHandlers.join(', ')); }
 
 // 关键函数必须存在（防漏贴类缺陷）
-const critical = ['spendSummary', 'todaySpend', 'monthSpend', 'last30dSpend', 'costOf', 'sessionTotals', 'computePricing', 'computeEstimate', 'getUsageSummary', 'refreshAllBalances', 'modelDisplayFromCache', 'providerDisplayFromCache', 'refreshModelCatalog', 'detectBillingMode', 'codexWindowKey', 'parseCodexUsage', 'parseOpenCodeGoUsage', 'mergeSubscriptionResult', 'kickSubscriptionRefresh', 'getSubscriptionSnapshotRpc', 'readCodexAuthFile', 'fetchCodexUsage', 'fetchOpenCodeGoUsage'];
+const critical = ['spendSummary', 'todaySpend', 'monthSpend', 'last30dSpend', 'costOf', 'sessionTotals', 'computePricing', 'computeEstimate', 'getUsageSummary', 'refreshAllBalances', 'modelDisplayFromCache', 'providerDisplayFromCache', 'refreshModelCatalog', 'detectBillingMode', 'codexWindowKey', 'parseCodexUsage', 'parseOpenCodeGoUsage', 'mergeSubscriptionResult', 'kickSubscriptionRefresh', 'getSubscriptionSnapshotRpc', 'readCodexAuthFile', 'fetchCodexUsage', 'fetchOpenCodeGoUsage', 'fetchOllamaUsage', 'parseOllamaUsage', 'parseHyperCredits'];
 const missCritical = critical.filter((f) => !defined.has(f));
 if (missCritical.length === 0) console.log('PASS  关键函数齐备：' + critical.join(', '));
 else { ok = false; console.log('FAIL  关键函数缺失：' + missCritical.join(', ')); }

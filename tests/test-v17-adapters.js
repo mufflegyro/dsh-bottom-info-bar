@@ -94,6 +94,9 @@ const normalizeAccountStatus = extractFn('normalizeAccountStatus');
 const detectBillingMode = extractFn('detectBillingMode');
 const subscriptionSourceFor = extractFn('subscriptionSourceFor');
 const accountForProvider = extractFn('accountForProvider');
+const parseHyperCredits = extractFn('parseHyperCredits'); // v1.11：Charm Hyper /v1/credits 解析
+const normalizeResetAt = extractFn('normalizeResetAt'); // parseOllamaUsage 的依赖（resetsAt 归一化）
+const parseOllamaUsage = extractFn('parseOllamaUsage'); // v1.11：Ollama Cloud /api/usage 解析
 const billingSourceFor = extractFn('billingSourceFor');
 
 let pass = 0, fail = 0;
@@ -295,6 +298,38 @@ check('client：JWT 套餐档位短名', clientSrc.includes('subscriptionPlanSho
 check('client：BILLING_PROVIDERS 兜底注入', clientSrc.includes('BILLING_PROVIDERS.indexOf(activeSessionModel.provider)'), true);
 check('client：账单服务名映射', clientSrc.includes("return 'AWS Bedrock'") && clientSrc.includes("return 'Cloudflare'") && clientSrc.includes("return 'Together'"), true);
 check('client：订阅服务名含小米 MiMo', clientSrc.includes("return t('ui.xiaomiMiMo')"), true);
+
+// ================= ⑨ v1.11：Charm Hyper /v1/credits + Ollama Cloud 账户映射 =================
+// Charm Hyper 官方/credits 响应：{ balance: 98 }（整数预付积分）或 { balance_usd: 12.5 }（美元额度）
+check('Hyper credits：balance 整数 → HC 98', parseHyperCredits({ balance: 98 }), { currency: 'HC', total: 98 });
+check('Hyper credits：balance_usd → HC 总额', parseHyperCredits({ balance_usd: 12.5 }), { currency: 'HC', total: 12.5 });
+check('Hyper credits：balance 优先于 balance_usd', parseHyperCredits({ balance: 10, balance_usd: 5 }), { currency: 'HC', total: 10 });
+check('Hyper credits：缺字段 → null', parseHyperCredits({}), null);
+check('Hyper credits：非数值 → null', parseHyperCredits({ balance: '98' }), null);
+check('Hyper credits：null → null', parseHyperCredits(null), null);
+// 账户映射与三态判定
+check('映射：hyper → 账户 hyper', accountForProvider('hyper'), 'hyper');
+check('映射：charm-hyper → 账户 hyper', accountForProvider('charm-hyper'), 'hyper');
+check('映射：charmhyper（常见 DSH 路由 id）→ 账户 hyper', accountForProvider('charmhyper'), 'hyper');
+check('映射：ollama-cloud → 账户 ollama-cloud', accountForProvider('ollama-cloud'), 'ollama-cloud');
+check('映射：本地 ollama → null', accountForProvider('ollama'), null);
+check('三态：hyper → balance（预付积分）', detectBillingMode('hyper', 'auto').mode, 'balance');
+check('三态：charmhyper → balance（预付积分）', detectBillingMode('charmhyper', 'auto').mode, 'balance');
+check('三态：ollama-cloud → subscription（额度窗口）', detectBillingMode('ollama-cloud', 'auto').mode, 'subscription');
+check('订阅源：ollama-cloud → ollama', subscriptionSourceFor('ollama-cloud'), 'ollama');
+check('账单源：ollama-cloud → null', billingSourceFor('ollama-cloud'), null);
+check('账单源：hyper → null', billingSourceFor('hyper'), null);
+// Ollama Cloud /api/usage 解析（0..1 已用比例；免费额度不公开绝对值）
+const ollamaBody = { limits: { session: { usage: 0.1661 }, weekly: { usage: 0.3 } } };
+const ollamaParsed = parseOllamaUsage(ollamaBody);
+check('Ollama：双窗口数量 = 2', ollamaParsed.windows.length, 2);
+check('Ollama：session → five_hour 17%', ollamaParsed.windows[0].key === 'five_hour' && ollamaParsed.windows[0].usedPercent, 17);
+check('Ollama：weekly → seven_day 30%', ollamaParsed.windows[1].key === 'seven_day' && ollamaParsed.windows[1].usedPercent, 30);
+check('Ollama：套餐名 Ollama', ollamaParsed.plan, 'Ollama');
+check('Ollama：无重置字段 → resetsAt null', ollamaParsed.windows[0].resetsAt, null);
+check('Ollama：usage>1 钳制到 100', parseOllamaUsage({ limits: { session: { usage: 2 } } }).windows[0].usedPercent, 100);
+check('Ollama：结构异常 → null', parseOllamaUsage({}), null);
+check('Ollama：null → null', parseOllamaUsage(null), null);
 
 console.log('\n结果：' + pass + ' PASS / ' + fail + ' FAIL');
 process.exit(fail > 0 ? 1 : 0);

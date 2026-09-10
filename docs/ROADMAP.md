@@ -15,6 +15,8 @@
 | 【Bug】本对话/今日/本月/全部花费没按服务商分家：切到 DeepSeek 后仍显示整个会话（含 OpenCode 期间记录）的合计，用户误以为扣了 DeepSeek 的钱 | 用户直接反馈（现场实证：会话 18 笔全为 opencode-go，¥0.88 被混入 DeepSeek 视图） | 高 | 花费统计按「服务商账户」隔离聚合：本对话/今日/本月/全部都只算当前服务商的记录 |
 | 【Bug】余额显示没做区分：对未适配服务商（含 opencode-go）一律回退显示 DeepSeek 余额（现场实证：provider=opencode-go 查余额返回 DeepSeek ¥22.47 + 401） | 用户直接反馈（现场实证） | 高 | 余额账户映射严格跟随当前服务商；未适配/未知服务商不再回退 DeepSeek，显示"未适配/估算"引导 |
 | 用户要求：把国产 AI 和国外 AI 的订阅套餐 + 订阅的 API 余额「全都适配一遍」 | 用户直接反馈 | 高 | 全量调研国产/国外平台（OpenAI、Claude、Gemini、OpenRouter、Kimi、豆包等），按「可真实接入 → 记账估算 → 无接口」分级，分批开发 |
+| 底部插件未适配「Ollama Cloud」的用量（5 小时/周窗口，免费/Pro） | 用户直接反馈 | 中 | 接入官方 `ollama.com/api/usage`（Bearer OLLAMA_API_KEY），走订阅制额度窗口 ✅ 已实现（v1.11 待发布） |
+| 底部插件未适配「Charm Hyper」的预付积分余额 | 用户直接反馈 | 中 | 接入官方 `hyper.charm.land/v1/credits`（Bearer HYPER_API_KEY），走余额制显示 ✅ 已实现（v1.11 待发布） |
 
 ## 现状盘点（2026-08-24）
 

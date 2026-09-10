@@ -76,12 +76,12 @@ check('低余额和低额度使用无框“低”字，状态不只依赖颜色�
 check('外部分组为 6px、标签与数据为 4px、模型内部圆点为 4px，层级清晰而不过松', clientSrc.includes('.bi-sep { color: var(--bi-separator); margin: 0 6px; }')
   && clientSrc.includes('.bi-metric-data { margin-left: 4px; }')
   && clientSrc.includes('.bi-model-dot { margin: 0 4px; flex: 0 0 auto; }'), true);
-check('数值语法统一：数值与紧随单位/货币符号整体加粗，中文数值与量词留白，标签保持常规字重', clientSrc.includes("metric(t('ui.balance.pushBalanceGroups'), symbol + fmt(bal.data.total)")
+check('数值语法统一：数值与紧随单位/货币符号整体加粗，中文数值与量词留白，标签保持常规字重', clientSrc.includes("metric(t('ui.balance.pushBalanceGroups'), symbol + fmt(bal.data.total")
   && clientSrc.includes("num(formatTps(statsProj.decodeTokens / (statsProj.decodeMs / 1e3)) + ' tok/s')")
   && clientSrc.includes("group([num(t(statsProj.turns === 1 ? 'ui.turnCount' : 'ui.turnCountPlural', { count: statsProj.turns })), ' · ', num(t(statsProj.steps === 1 ? 'ui.stepCount' : 'ui.stepCountPlural', { count: statsProj.steps }))], false, 'turnsSteps')")
   && clientSrc.includes("group([metric(t('ui.input.BottomInfoBar'), formatTokens(billedInput(usageProj)) + ' tok')"), true);
 check('标签与数据通过 metric 组件统一 4px 边界，不依赖普通字符空格', clientSrc.includes("function metric(label, value, extraClass)")
-  && clientSrc.includes("metric(t('ui.balance.pushBalanceGroups'), symbol + fmt(bal.data.total)")
+  && clientSrc.includes("metric(t('ui.balance.pushBalanceGroups'), symbol + fmt(bal.data.total")
   && clientSrc.includes("metric(t('ui.session'), costTxt)")
   && clientSrc.includes("metric(t('ui.cacheHit'), hit + '%')"), true);
 check('超长模型名不会被根容器裁切：模型详情可整体换行，视觉胶囊保留能力词并省略过长型号', !clientSrc.includes('display: block; overflow: hidden; font-size: 12px')
@@ -90,13 +90,13 @@ check('超长模型名不会被根容器裁切：模型详情可整体换行，�
   && clientSrc.includes('.bi-vision-model { min-width: 0; overflow: hidden; text-overflow: ellipsis; }')
   && clientSrc.includes("React.createElement('span', { className: 'bi-vision-kind' }, t('ui.vision'))"), true);
 check('整条信息栏的读屏名称引用当前可见信息，切换操作作为独立说明而不覆盖内容', !clientSrc.includes("'aria-label': full ? '切换为简洁模式'")
-  && clientSrc.includes("'aria-labelledby': full && row1 !== null ? 'dsh-bottom-info-bar-native dsh-bottom-info-bar-primary' : 'dsh-bottom-info-bar-primary'")
+  && clientSrc.includes("'aria-labelledby': row2 === null")
   && clientSrc.includes("'aria-describedby': 'dsh-bottom-info-bar-action'")
   && clientSrc.includes("id: 'dsh-bottom-info-bar-action'")
   && clientSrc.includes("className: 'bi-sr-only'"), true);
 check('报错标签统一延后到居中信息组的末尾', clientSrc.includes('const trailingErrorGroups = []')
   && clientSrc.includes('trailingErrorGroups.push')
-  && clientSrc.includes("const row2 = React.createElement('div', { id: 'dsh-bottom-info-bar-primary', className: 'bi-row2' }, ...nodes);"), true);
+  && clientSrc.includes("const row2 = nodes.length === 0 ? null : React.createElement('div', { id: 'dsh-bottom-info-bar-primary', className: 'bi-row2' }, ...nodes);"), true);
 check('多个刷新失败合并为一个右侧标签', clientSrc.includes('const seenRefreshFailure = { value: false };')
   && clientSrc.includes("if (text !== t('ui.refreshFailed')) return true;"), true);
 check('状态说明维持原生悬浮提示，不额外引入读屏文案', !clientSrc.includes("'aria-label': title")
@@ -114,6 +114,12 @@ check('视觉模型名采用高对比电光蓝实色椭圆、白字、深色细�
   && clientSrc.includes('border: 1px solid #0044cc')
   && clientSrc.includes('color: #fff')
   && clientSrc.includes('background: #0057ff'), true);
+
+// 8) 未适配服务商（v1.12）：整条 provider 行隐藏，只保留原生会话统计行（不显示模型名/「未适配」提示）
+check('未适配服务商跳过 balance 渲染 → row2 为空（dispatch 分支）', clientSrc.includes("} else if (state.balance && state.balance.unmapped) {"), true);
+check('未适配时不在 pushBalanceGroups 内渲染提示（旧「未适配」弱提示已移除）', !clientSrc.includes("t('ui.balanceLookupIsNotYet')"), true);
+check('未适配时主行为空则 row2 不创建（保留 row1 原生统计）', clientSrc.includes("const row2 = nodes.length === 0 ? null : React.createElement('div', { id: 'dsh-bottom-info-bar-primary', className: 'bi-row2' }, ...nodes);"), true);
+check('未适配读屏名称回退到原生行（row1）', clientSrc.includes("? (row1 !== null ? 'dsh-bottom-info-bar-native' : undefined)"), true);
 
 console.log('\n结果：' + pass + ' PASS / ' + fail + ' FAIL');
 process.exit(fail > 0 ? 1 : 0);
